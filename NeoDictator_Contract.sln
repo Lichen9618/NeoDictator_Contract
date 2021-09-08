@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30711.63
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CoreContract", "NeoDictator_Contract\CoreContract\CoreContract.csproj", "{72DE5C31-C606-4E1C-9534-00D72BF42047}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VoteContract", "NeoDictator_Contract\voteContract\VoteContract.csproj", "{C52DE9A9-D55C-4EE5-801D-1376A4E35B9E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{72DE5C31-C606-4E1C-9534-00D72BF42047}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72DE5C31-C606-4E1C-9534-00D72BF42047}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72DE5C31-C606-4E1C-9534-00D72BF42047}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72DE5C31-C606-4E1C-9534-00D72BF42047}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C52DE9A9-D55C-4EE5-801D-1376A4E35B9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C52DE9A9-D55C-4EE5-801D-1376A4E35B9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C52DE9A9-D55C-4EE5-801D-1376A4E35B9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C52DE9A9-D55C-4EE5-801D-1376A4E35B9E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6E5D49F7-9FA9-42DD-82B3-2B3CA1077F70}
+	EndGlobalSection
+EndGlobal
