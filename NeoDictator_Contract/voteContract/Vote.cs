@@ -16,9 +16,13 @@ namespace HelloContract
     [ManifestExtra("Description", "This is a HelloContract")]
     public class HelloContract : SmartContract
     {
-        public static bool Main()
+        public static BigInteger ClaimGasByCore()
         {
-            return true;
+            //验证是否为Core合约
+            BigInteger gasBalanceBefore = GAS.BalanceOf(Runtime.ExecutingScriptHash);
+            Contract.Call(NEO.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, Runtime.ExecutingScriptHash, NEO.BalanceOf(Runtime.ExecutingScriptHash));
+            BigInteger gasBalanceAfter = GAS.BalanceOf(Runtime.ExecutingScriptHash);
+            return gasBalanceAfter - gasBalanceBefore;
         }
     }
 }

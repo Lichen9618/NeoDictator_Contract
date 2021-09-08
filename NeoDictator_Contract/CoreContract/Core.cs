@@ -20,6 +20,10 @@ namespace HelloContract
         private const byte userStakePrefix = 0x03;
         private const byte voteContractPrefix = 0x04;
         private const byte currentVoteContractPrefix = 0x05;
+        private const byte lastCalculationHeightKey = 0x06;
+        private const byte lastGasProfitPerNeoKey = 0x07;
+        private const byte historyProfitPrefix = 0x08;
+
 
         public static event Action<object> Notify;
 
@@ -27,8 +31,19 @@ namespace HelloContract
         public static bool Stake(UInt160 fromAddress, BigInteger StakeAmount) 
         {
             //清算一次Gas收益
+            Iterator VoteContracts = GetAllVoteContract();
+            BigInteger gasIncreaseAmount = 0;
+            while (VoteContracts.Next()) 
+            {
+                UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                gasIncreaseAmount += (BigInteger)Contract.Call(voteContractHash, "claimGasByCore", CallFlags.All);
+            }
+            //记录此高度上的单位NEO产生的收益
+            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / NEO.BalanceOf(Runtime.ExecutingScriptHash);
+            UpdateGasProfitPerNEO(increaseGasProfitPerNeo);
 
             //质押用户NEO并进行记录
+            //TODO:直接转账至vote合约，节省gas
             Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, fromAddress, Runtime.ExecutingScriptHash, StakeAmount, null), "stake neo fail");
             AddUserStakeAmount(fromAddress, StakeAmount);            
 
@@ -39,14 +54,23 @@ namespace HelloContract
         public static bool Unstake(UInt160 fromAddress, BigInteger UnstakeAmount) 
         {
             //清算一次Gas收益
-
-            
+            Iterator VoteContracts = GetAllVoteContract();
+            BigInteger gasIncreaseAmount = 0;
+            while (VoteContracts.Next())
+            {
+                UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                gasIncreaseAmount += (BigInteger)Contract.Call(voteContractHash, "claimGasByCore", CallFlags.All);
+            }
+            //记录此高度上的单位NEO产生的收益
+            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / NEO.BalanceOf(Runtime.ExecutingScriptHash);
+            UpdateGasProfitPerNEO(increaseGasProfitPerNeo);
 
             //更新质押记录并进行转账
             AddUserStakeAmount(fromAddress, -UnstakeAmount);
-            //从子投票合约中回收，并转账至user
+            //从子投票合约中回收，并转账至user            
             Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, fromAddress, UnstakeAmount, null), "Unstake neo fail");
 
+            return true;
         }
         #endregion
 
@@ -98,8 +122,15 @@ namespace HelloContract
         private static void AddUserStakeAmount(UInt160 fromAddress, BigInteger addAmount) 
         {
             StakeInfo Info = GetUserStakeInfoByAddress(fromAddress);
+            //计算应有收益
+            BigInteger historyValue = GetHistoryGasProfitPerNEO(Info.StakeHeight);
+            BigInteger currentValue = GetLastGasProfitPerNeo();
+            BigInteger profit = (currentValue - historyValue) * Info.StakeAmount;
+
             Info.StakeAmount += addAmount;
             Info.StakeHeight = Ledger.CurrentIndex;
+            Info.unclaimProfit += profit;
+
             Require(Info.StakeAmount >= 0, "StakeAmount error");
             SetUserStakeInfo(fromAddress, Info);
         }
@@ -134,6 +165,52 @@ namespace HelloContract
         }
         #endregion
 
+        #region globalState
+        private static void UpdateLastCalculationHeight() 
+        {
+            Storage.Put(Storage.CurrentContext, new byte[] { lastCalculationHeightKey }, Ledger.CurrentIndex);
+        }
+
+        [Safe]
+        public static BigInteger GetLastCalculationHeight() 
+        {
+            ByteString rawHeight = Storage.Get(Storage.CurrentContext, new byte[] { lastCalculationHeightKey });
+            return (rawHeight is null) ? 0 : (BigInteger)rawHeight;
+        }
+        
+        /// <summary>
+        /// 更新 最近单位NEO可获得收益
+        /// 更新 当前高度NEO可获得收益
+        /// </summary>
+        /// <param name="increaseAmount"></param>
+        private static void UpdateGasProfitPerNEO(BigInteger increaseAmount)
+        {
+            BigInteger value = GetLastGasProfitPerNeo() + increaseAmount;
+            Storage.Put(Storage.CurrentContext, new byte[] { lastGasProfitPerNeoKey }, value);
+            GetHistoryProfitMap().Put(((ByteString)(BigInteger)Ledger.CurrentIndex), value);
+        }
+
+        [Safe]
+        public static BigInteger GetHistoryGasProfitPerNEO(uint Height) 
+        {
+            ByteString rawResult = GetHistoryProfitMap().Get((ByteString)(BigInteger)Height);
+            return (rawResult is null) ? 0 : (BigInteger)rawResult;
+        }
+
+        [Safe]
+        public static BigInteger GetLastGasProfitPerNeo()
+        {
+            ByteString rawProfit = Storage.Get(Storage.CurrentContext, new byte[] { lastGasProfitPerNeoKey });
+            return (rawProfit is null) ? 0 : (BigInteger)rawProfit;
+        }
+
+        private static StorageMap GetHistoryProfitMap() 
+        {
+            StorageMap result = new StorageMap(Storage.CurrentContext, historyProfitPrefix);
+            return result;
+        }
+        #endregion
+
         #region Helper
         private static void Require(bool condition, string info) 
         {
@@ -150,6 +227,7 @@ namespace HelloContract
         {
             public BigInteger StakeAmount;
             public uint StakeHeight;
+            public BigInteger unclaimProfit;
         }
         #endregion
     }
