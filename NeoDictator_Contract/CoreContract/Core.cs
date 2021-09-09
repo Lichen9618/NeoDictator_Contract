@@ -44,7 +44,8 @@ namespace HelloContract
 
             //质押用户NEO并进行记录
             //TODO:直接转账至vote合约，节省gas
-            Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, fromAddress, Runtime.ExecutingScriptHash, StakeAmount, null), "stake neo fail");
+            UInt160 currentVoteContract = GetVoteContractInternal();
+            Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, fromAddress, currentVoteContract, StakeAmount, null), "stake neo fail");
             AddUserStakeAmount(fromAddress, StakeAmount);            
 
             //使用新增NEO进行投票
@@ -53,13 +54,18 @@ namespace HelloContract
 
         public static bool Unstake(UInt160 fromAddress, BigInteger UnstakeAmount) 
         {
-            //清算一次Gas收益
+            //清算一次Gas收益,同时记录有足够多Gas的VoteContract
+            UInt160 unstakeVoteContract = null;
             Iterator VoteContracts = GetAllVoteContract();
             BigInteger gasIncreaseAmount = 0;
             while (VoteContracts.Next())
             {
                 UInt160 voteContractHash = (UInt160)VoteContracts.Value;
                 gasIncreaseAmount += (BigInteger)Contract.Call(voteContractHash, "claimGasByCore", CallFlags.All);
+                if (GAS.BalanceOf(voteContractHash) >= UnstakeAmount && unstakeVoteContract is null) 
+                {
+                    unstakeVoteContract = voteContractHash;
+                }
             }
             //记录此高度上的单位NEO产生的收益
             BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / NEO.BalanceOf(Runtime.ExecutingScriptHash);
@@ -68,10 +74,30 @@ namespace HelloContract
             //更新质押记录并进行转账
             AddUserStakeAmount(fromAddress, -UnstakeAmount);
             //从子投票合约中回收，并转账至user            
-            Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, fromAddress, UnstakeAmount, null), "Unstake neo fail");
+            Require((bool)Contract.Call(unstakeVoteContract, "unstakeByCore", CallFlags.All, fromAddress, UnstakeAmount, null), "Unstake neo fail");
 
             return true;
         }
+
+        public static bool ClaimProfit(UInt160 claimAddress) 
+        {
+            Require(Runtime.CheckWitness(claimAddress), "check witness fail");
+            StakeInfo Info = GetUserStakeInfoByAddress(claimAddress);
+            UInt160 unstakeVoteContract = null;
+            Iterator VoteContracts = GetAllVoteContract();
+            while (VoteContracts.Next())
+            {
+                UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                if (GAS.BalanceOf(voteContractHash) >= Info.unclaimProfit)
+                {
+                    unstakeVoteContract = voteContractHash;
+                    break;
+                }
+            }
+            Require((bool)Contract.Call(unstakeVoteContract, "claimByCore", CallFlags.All, claimAddress), "claim gas fail");
+            return true;
+        }
+
         #endregion
 
         #region DAO
