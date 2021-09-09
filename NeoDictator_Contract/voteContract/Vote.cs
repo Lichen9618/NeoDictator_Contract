@@ -8,12 +8,12 @@ using Neo.SmartContract.Framework.Native;
 using Neo.SmartContract.Framework.Services;
 
 
-namespace CoreContract
+namespace VoteContract
 {
-    [DisplayName("HelloContract")]
+    [DisplayName("VoteContract")]
     [ManifestExtra("Author", "NEO")]
     [ManifestExtra("Email", "developer@neo.org")]
-    [ManifestExtra("Description", "This is a HelloContract")]
+    [ManifestExtra("Description", "This is a VoteContract")]
     public class HelloContract : SmartContract
     {
         public static BigInteger ClaimGasByCore()
