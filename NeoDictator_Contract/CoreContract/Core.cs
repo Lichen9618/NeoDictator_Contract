@@ -83,18 +83,36 @@ namespace HelloContract
         {
             Require(Runtime.CheckWitness(claimAddress), "check witness fail");
             StakeInfo Info = GetUserStakeInfoByAddress(claimAddress);
-            UInt160 unstakeVoteContract = null;
-            Iterator VoteContracts = GetAllVoteContract();
-            while (VoteContracts.Next())
+            if (Info.unclaimProfit <= GAS.BalanceOf(Runtime.ExecutingScriptHash))
             {
-                UInt160 voteContractHash = (UInt160)VoteContracts.Value;
-                if (GAS.BalanceOf(voteContractHash) >= Info.unclaimProfit)
-                {
-                    unstakeVoteContract = voteContractHash;
-                    break;
-                }
+                Require((bool)Contract.Call(GAS.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, claimAddress, Info.unclaimProfit, null), "claim gas fail");
             }
-            Require((bool)Contract.Call(unstakeVoteContract, "claimByCore", CallFlags.All, claimAddress), "claim gas fail");
+            else 
+            {
+                UInt160 unstakeVoteContract = null;
+                Iterator VoteContracts = GetAllVoteContract();
+                while (VoteContracts.Next())
+                {
+                    UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                    if (GAS.BalanceOf(voteContractHash) >= Info.unclaimProfit)
+                    {
+                        unstakeVoteContract = voteContractHash;
+                        break;
+                    }
+                }
+                if (unstakeVoteContract is null)
+                {
+                    Iterator Contracts = GetAllVoteContract();
+                    while (Contracts.Next())
+                    {
+                        UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                        Require((bool)Contract.Call(voteContractHash, "claimByCore", CallFlags.All, Runtime.ExecutingScriptHash), "claim gas fail");
+                    }
+                }
+                Require((bool)Contract.Call(unstakeVoteContract, "claimByCore", CallFlags.All, claimAddress), "claim gas fail");
+            }
+            Info.unclaimProfit = 0;
+            SetUserStakeInfo(claimAddress, Info);
             return true;
         }
 
