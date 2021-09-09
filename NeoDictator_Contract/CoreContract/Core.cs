@@ -17,6 +17,7 @@ namespace CoreContract
     public class HelloContract : SmartContract
     {
         private const byte daoAccountPrefix = 0x01;
+        private const byte neoStakedAmountKey = 0x02;
         private const byte userStakePrefix = 0x03;
         private const byte voteContractPrefix = 0x04;
         private const byte currentVoteContractPrefix = 0x05;
@@ -32,6 +33,7 @@ namespace CoreContract
         #region userInterface
         public static bool Stake(UInt160 fromAddress, BigInteger StakeAmount) 
         {
+            Require(StakeAmount > 0, "bad stakeAmount");
             //清算一次Gas收益
             Iterator VoteContracts = GetAllVoteContract();
             BigInteger gasIncreaseAmount = 0;
@@ -41,22 +43,23 @@ namespace CoreContract
                 gasIncreaseAmount += (BigInteger)Contract.Call(voteContractHash, "claimGasByCore", CallFlags.All);
             }
             //记录此高度上的单位NEO产生的收益
-            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / NEO.BalanceOf(Runtime.ExecutingScriptHash);
+            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / GetNeoStakeAmount();
             UpdateGasProfitPerNEO(increaseGasProfitPerNeo);
 
             //质押用户NEO并进行记录
-            //TODO:直接转账至vote合约，节省gas
             UInt160 currentVoteContract = GetVoteContractInternal();
             Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, fromAddress, currentVoteContract, StakeAmount, null), "stake neo fail");
             AddUserStakeAmount(fromAddress, StakeAmount);
 
             WithDrawTransactionFee(fromAddress);
-            //使用新增NEO进行投票
+            UpdateNeoStakedAmount(StakeAmount);
+            //使用新增NEO进行投票           
             return true;
         }
 
         public static bool Unstake(UInt160 fromAddress, BigInteger UnstakeAmount) 
         {
+            Require(UnstakeAmount > 0, "bad unstakeAmount");
             //清算一次Gas收益,同时记录有足够多Gas的VoteContract
             UInt160 unstakeVoteContract = null;
             Iterator VoteContracts = GetAllVoteContract();
@@ -71,11 +74,12 @@ namespace CoreContract
                 }
             }
             //记录此高度上的单位NEO产生的收益
-            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / NEO.BalanceOf(Runtime.ExecutingScriptHash);
+            BigInteger increaseGasProfitPerNeo = gasIncreaseAmount / GetNeoStakeAmount();
             UpdateGasProfitPerNEO(increaseGasProfitPerNeo);
 
             //更新质押记录并进行转账
             AddUserStakeAmount(fromAddress, -UnstakeAmount);
+            UpdateNeoStakedAmount(-UnstakeAmount);
             //从子投票合约中回收，并转账至user  
             if (unstakeVoteContract is null)
             {
@@ -294,10 +298,27 @@ namespace CoreContract
         #endregion
 
         #region globalState
-        private static void UpdateLastCalculationHeight() 
+        private static void UpdateNeoStakedAmount(BigInteger amount) 
         {
-            Storage.Put(Storage.CurrentContext, new byte[] { lastCalculationHeightKey }, Ledger.CurrentIndex);
+            ByteString rawAmount = Storage.Get(Storage.CurrentContext, new byte[] { neoStakedAmountKey });
+            BigInteger stakedAmount = rawAmount is null ? 0 : (BigInteger)rawAmount;
+            stakedAmount += amount;
+            Require(stakedAmount >= 0, "stakedAmount error");
+            Storage.Put(Storage.CurrentContext, new byte[] { neoStakedAmountKey }, stakedAmount);
         }
+
+        public static BigInteger GetNeoStakeAmount() 
+        {
+            ByteString rawAmount = Storage.Get(Storage.CurrentContext, new byte[] { neoStakedAmountKey });
+            return rawAmount is null ? 0 : (BigInteger)rawAmount;
+        }
+
+
+
+        //private static void UpdateLastCalculationHeight() 
+        //{
+        //    Storage.Put(Storage.CurrentContext, new byte[] { lastCalculationHeightKey }, Ledger.CurrentIndex);
+        //}
 
         [Safe]
         public static BigInteger GetLastCalculationHeight() 
