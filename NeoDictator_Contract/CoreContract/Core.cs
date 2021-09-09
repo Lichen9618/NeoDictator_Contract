@@ -8,7 +8,7 @@ using Neo.SmartContract.Framework.Native;
 using Neo.SmartContract.Framework.Services;
 
 
-namespace HelloContract
+namespace CoreContract
 {
     [DisplayName("CoreContract")]
     [ManifestExtra("Author", "NEODictator")]
@@ -23,6 +23,8 @@ namespace HelloContract
         private const byte lastCalculationHeightKey = 0x06;
         private const byte lastGasProfitPerNeoKey = 0x07;
         private const byte historyProfitPrefix = 0x08;
+        private const byte voteTargetWhiteListPrefix = 0x09;
+        private const byte transactionFeeKey = 0x0A;
 
 
         public static event Action<object> Notify;
@@ -46,8 +48,9 @@ namespace HelloContract
             //TODO:直接转账至vote合约，节省gas
             UInt160 currentVoteContract = GetVoteContractInternal();
             Require((bool)Contract.Call(NEO.Hash, "transfer", CallFlags.All, fromAddress, currentVoteContract, StakeAmount, null), "stake neo fail");
-            AddUserStakeAmount(fromAddress, StakeAmount);            
+            AddUserStakeAmount(fromAddress, StakeAmount);
 
+            WithDrawTransactionFee(fromAddress);
             //使用新增NEO进行投票
             return true;
         }
@@ -62,7 +65,7 @@ namespace HelloContract
             {
                 UInt160 voteContractHash = (UInt160)VoteContracts.Value;
                 gasIncreaseAmount += (BigInteger)Contract.Call(voteContractHash, "claimGasByCore", CallFlags.All);
-                if (GAS.BalanceOf(voteContractHash) >= UnstakeAmount && unstakeVoteContract is null) 
+                if (NEO.BalanceOf(voteContractHash) >= UnstakeAmount && unstakeVoteContract is null) 
                 {
                     unstakeVoteContract = voteContractHash;
                 }
@@ -73,21 +76,41 @@ namespace HelloContract
 
             //更新质押记录并进行转账
             AddUserStakeAmount(fromAddress, -UnstakeAmount);
-            //从子投票合约中回收，并转账至user            
-            Require((bool)Contract.Call(unstakeVoteContract, "unstakeByCore", CallFlags.All, fromAddress, UnstakeAmount, null), "Unstake neo fail");
-
-            return true;
+            //从子投票合约中回收，并转账至user  
+            if (unstakeVoteContract is null)
+            {
+                VoteContracts = GetAllVoteContract();
+                BigInteger unstakedAmount = 0;
+                while (VoteContracts.Next()) 
+                {
+                    UInt160 voteContractHash = (UInt160)VoteContracts.Value;
+                    BigInteger NEOBalance = NEO.BalanceOf(voteContractHash);
+                    if (UnstakeAmount - unstakedAmount >= NEOBalance)
+                    {
+                        Require((bool)Contract.Call(unstakeVoteContract, "unstakeByCore", CallFlags.All, fromAddress, UnstakeAmount, null), "Unstake neo fail");
+                        return true;
+                    }
+                    else 
+                    {
+                        Require((bool)Contract.Call(unstakeVoteContract, "unstakeByCore", CallFlags.All, fromAddress, NEOBalance, null), "Unstake neo fail");
+                        unstakedAmount += NEOBalance;
+                    }                   
+                }
+                throw new Exception("NEO not enough for Unstake");
+            }
+            else 
+            {
+                Require((bool)Contract.Call(unstakeVoteContract, "unstakeByCore", CallFlags.All, fromAddress, UnstakeAmount, null), "Unstake neo fail");
+                WithDrawTransactionFee(fromAddress);
+                return true;
+            }
         }
 
         public static bool ClaimProfit(UInt160 claimAddress) 
         {
             Require(Runtime.CheckWitness(claimAddress), "check witness fail");
             StakeInfo Info = GetUserStakeInfoByAddress(claimAddress);
-            if (Info.unclaimProfit <= GAS.BalanceOf(Runtime.ExecutingScriptHash))
-            {
-                Require((bool)Contract.Call(GAS.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, claimAddress, Info.unclaimProfit, null), "claim gas fail");
-            }
-            else 
+            if (Info.unclaimProfit > GAS.BalanceOf(Runtime.ExecutingScriptHash))
             {
                 UInt160 unstakeVoteContract = null;
                 Iterator VoteContracts = GetAllVoteContract();
@@ -106,11 +129,15 @@ namespace HelloContract
                     while (Contracts.Next())
                     {
                         UInt160 voteContractHash = (UInt160)VoteContracts.Value;
-                        Require((bool)Contract.Call(voteContractHash, "claimByCore", CallFlags.All, Runtime.ExecutingScriptHash), "claim gas fail");
+                        Require((bool)Contract.Call(voteContractHash, "claimByCore", CallFlags.All, Runtime.ExecutingScriptHash), "claim from vote fail");
                     }
                 }
-                Require((bool)Contract.Call(unstakeVoteContract, "claimByCore", CallFlags.All, claimAddress), "claim gas fail");
+                else 
+                {
+                    Require((bool)Contract.Call(unstakeVoteContract, "claimByCore", CallFlags.All, Runtime.ExecutingScriptHash), "claim from vote fail");
+                }                
             }
+            Require((bool)Contract.Call(GAS.Hash, "transfer", CallFlags.All, Runtime.ExecutingScriptHash, claimAddress, Info.unclaimProfit, null), "claim gas fail");
             Info.unclaimProfit = 0;
             SetUserStakeInfo(claimAddress, Info);
             return true;
@@ -122,6 +149,63 @@ namespace HelloContract
         public static UInt160 GetDAOAccount() 
         {            
             return (UInt160)Storage.Get(Storage.CurrentContext, new byte[] { daoAccountPrefix });
+        }
+
+        public static bool SetNEOPosition(UInt160 ContractA, UInt160 ContractB, BigInteger amount) 
+        {
+            Require(Runtime.CheckWitness(GetDAOAccount()), "check DAO witeness fail");
+            return (bool)Contract.Call(ContractA, "changeNEOPosition", CallFlags.All, ContractB, amount);
+        }
+
+        public static bool SetVoteTarget(UInt160 voteContract, Neo.Cryptography.ECC.ECPoint voteTo) 
+        {
+            Require(Runtime.CheckWitness(GetDAOAccount()), "check DAO witness fail");
+            Contract.Call(voteContract, "changeVoteTargetByCore", CallFlags.All, voteTo);
+            return true;
+        }
+
+        private static void WithDrawTransactionFee(UInt160 fromAddress) 
+        {
+            Require((bool)Contract.Call(GAS.Hash, "transfer", CallFlags.All, fromAddress, Runtime.ExecutingScriptHash, GetTransactionFee(), null), "withdraw fee fail");
+        }
+
+        [Safe]
+        public static BigInteger GetTransactionFee() 
+        {
+            ByteString rawFee = Storage.Get(Storage.CurrentContext, new byte[] { transactionFeeKey });
+            return rawFee is null ? 1000000 : (BigInteger)rawFee;
+        }
+
+        public static bool SetTransactionFee(BigInteger Fee) 
+        {
+            Require(Runtime.CheckWitness(GetDAOAccount()), "Check DAO witness fail");
+            Storage.Put(Storage.CurrentContext, new byte[] { transactionFeeKey }, Fee);
+            return true;
+        }
+
+        public static bool IsInVoteTargetWhiteList(UInt160 target) 
+        {
+            StorageMap map = VoteTargetWhiteListMap();
+            Iterator allTargets = map.Find();
+            while (allTargets.Next()) 
+            {
+                UInt160 WhiteList = (UInt160)allTargets.Value;
+                if (WhiteList.Equals(target)) return true;
+            }
+            return false;
+        }
+
+        public static bool AdminVoteTargetWhiteList(BigInteger index, UInt160 voteTarget) 
+        {
+            Require(Runtime.CheckWitness(GetDAOAccount()), "Check DAO witness fail");
+            StorageMap map = VoteContractStorageMap();
+            map.Put(index.ToByteArray(), voteTarget);
+            return true;
+        }
+
+        private static StorageMap VoteTargetWhiteListMap() 
+        {
+            return new StorageMap(Storage.CurrentContext, voteTargetWhiteListPrefix);
         }
         #endregion
 
