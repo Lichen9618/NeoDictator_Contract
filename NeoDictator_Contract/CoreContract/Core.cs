@@ -27,7 +27,11 @@ namespace CoreContract
         private const byte voteTargetWhiteListPrefix = 0x09;
         private const byte transactionFeeKey = 0x0A;
 
+        //TODO:部署前确认初始的DAOAccount
+        [InitialValue("Neo4N2sfMRuvMctC7Ej3tu4G4mDLaoxE7g", ContractParameterType.Hash160)]
+        private static readonly UInt160 defaultDAOAccount = default;
 
+        public static event Action<object> OnDeploy;
         public static event Action<object> Notify;
 
         #region userInterface
@@ -150,6 +154,19 @@ namespace CoreContract
         #endregion
 
         #region DAO
+        public static void _deploy(object data, bool update)
+        {
+            Storage.Put(Storage.CurrentContext, new byte[] { daoAccountPrefix }, defaultDAOAccount);
+            OnDeploy(defaultDAOAccount);
+        }
+
+        public static bool Update(ByteString nefFile, string manifest)
+        {
+            Require(Runtime.CheckWitness(GetDAOAccount()), "upgrade: CheckWitness failed!");
+            ContractManagement.Update(nefFile, manifest);
+            return true;
+        }
+
         public static UInt160 GetDAOAccount() 
         {            
             return (UInt160)Storage.Get(Storage.CurrentContext, new byte[] { daoAccountPrefix });
@@ -312,13 +329,6 @@ namespace CoreContract
             ByteString rawAmount = Storage.Get(Storage.CurrentContext, new byte[] { neoStakedAmountKey });
             return rawAmount is null ? 0 : (BigInteger)rawAmount;
         }
-
-
-
-        //private static void UpdateLastCalculationHeight() 
-        //{
-        //    Storage.Put(Storage.CurrentContext, new byte[] { lastCalculationHeightKey }, Ledger.CurrentIndex);
-        //}
 
         [Safe]
         public static BigInteger GetLastCalculationHeight() 
